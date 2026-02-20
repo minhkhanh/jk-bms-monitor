@@ -1,0 +1,18 @@
+# Rust
+/rust/target/
+
+# Android
+/android/.gradle/
+/android/.idea/
+/android/build/
+/android/app/build/
+/android/bmslib/build/
+/android/bmslib/src/main/cpp/.cxx/
+/android/local.properties
+*.apk
+*.aab
+
+# IDE
+.DS_Store
+*.iml
+android/bmslib/.cxx
