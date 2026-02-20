@@ -5,9 +5,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.floatPreferencesKey
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.*
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
@@ -18,42 +15,46 @@ import androidx.glance.appwidget.provideContent
 import androidx.glance.color.ColorProvider
 import androidx.glance.layout.*
 import androidx.glance.text.*
-import androidx.glance.state.GlanceStateDefinition
-import androidx.glance.state.PreferencesGlanceStateDefinition
 import com.jkbms.monitor.MainActivity
+import com.jkbms.monitor.data.BmsDataStore
+import com.jkbms.monitor.worker.BmsWorkScheduler
 
 class BmsWidget : GlanceAppWidget() {
 
-    companion object {
-        val KEY_BATTERY_PERCENT = intPreferencesKey("battery_percent")
-        val KEY_BATTERY_VOLTAGE = floatPreferencesKey("battery_voltage")
-        val KEY_BATTERY_CURRENT = floatPreferencesKey("battery_current")
-        val KEY_BATTERY_POWER = floatPreferencesKey("battery_power")
-        val KEY_TEMPERATURE = floatPreferencesKey("temperature")
-        val KEY_DEVICE_NAME = stringPreferencesKey("device_name")
-        val KEY_LAST_UPDATE = stringPreferencesKey("last_update")
-    }
-
-    override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
-
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val dataStore = BmsDataStore(context)
+        val percent = dataStore.getCachedBatteryPercent()
+        val voltage = dataStore.getCachedVoltage()
+        val current = dataStore.getCachedCurrent()
+        val power = dataStore.getCachedPower()
+        val mosfetTemp = dataStore.getCachedMosfetTemp()
+        val deviceName = dataStore.getSelectedDeviceName() ?: "JK BMS"
+        val lastUpdate = dataStore.getLastUpdateFormatted()
+
         provideContent {
-            BmsWidgetContent()
+            BmsWidgetContent(
+                percent = percent,
+                voltage = voltage,
+                current = current,
+                power = power,
+                temperature = mosfetTemp,
+                deviceName = deviceName,
+                lastUpdate = lastUpdate
+            )
         }
     }
 }
 
 @Composable
-fun BmsWidgetContent() {
-    val prefs = currentState<androidx.datastore.preferences.core.Preferences>()
-    val percent = prefs[BmsWidget.KEY_BATTERY_PERCENT] ?: -1
-    val voltage = prefs[BmsWidget.KEY_BATTERY_VOLTAGE] ?: 0f
-    val current = prefs[BmsWidget.KEY_BATTERY_CURRENT] ?: 0f
-    val power = prefs[BmsWidget.KEY_BATTERY_POWER] ?: 0f
-    val temperature = prefs[BmsWidget.KEY_TEMPERATURE] ?: 0f
-    val deviceName = prefs[BmsWidget.KEY_DEVICE_NAME] ?: "JK BMS"
-    val lastUpdate = prefs[BmsWidget.KEY_LAST_UPDATE] ?: "--"
-
+fun BmsWidgetContent(
+    percent: Int,
+    voltage: Float,
+    current: Float,
+    power: Float,
+    temperature: Float,
+    deviceName: String,
+    lastUpdate: String
+) {
     val batteryColor = when {
         percent < 0 -> ColorProvider(Color(0xFF757575), Color(0xFF757575))
         percent > 50 -> ColorProvider(Color(0xFF4CAF50), Color(0xFF4CAF50))
@@ -134,4 +135,13 @@ fun BmsWidgetContent() {
 
 class BmsWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BmsWidget()
+
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        // When widget is added, ensure background refresh is scheduled
+        val dataStore = BmsDataStore(context)
+        if (dataStore.hasSelectedDevice()) {
+            BmsWorkScheduler.schedulePeriodicRefresh(context)
+        }
+    }
 }

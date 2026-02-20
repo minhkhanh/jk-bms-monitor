@@ -36,6 +36,7 @@ class BmsRepository(context: Context) {
 
     private val scanner = BleScanner(context)
     private val connection = BleConnection(context)
+    val dataStore = BmsDataStore(context)
 
     val isBluetoothEnabled: Boolean get() = scanner.isBluetoothEnabled
     val isConnected: Boolean get() = connection.isConnected
@@ -54,14 +55,36 @@ class BmsRepository(context: Context) {
         connection.writeCharacteristic(getDeviceInfoRequest())
         val responseData = collectResponse(RECORD_TYPE_DEVICE_INFO)
         Log.d(TAG, "getDeviceInfo response: ${responseData.size} bytes")
-        return parseDeviceInfo(responseData)
+        val info = parseDeviceInfo(responseData)
+        dataStore.saveCachedDeviceInfo(info)
+        return info
     }
 
     suspend fun getCellData(): CellData {
         connection.writeCharacteristic(getCellDataRequest())
         val responseData = collectResponse(RECORD_TYPE_CELL_DATA)
         Log.d(TAG, "getCellData response: ${responseData.size} bytes")
-        return parseCellData(responseData)
+        val data = parseCellData(responseData)
+        dataStore.saveCachedCellData(data)
+        return data
+    }
+
+    /**
+     * Connect to saved device, fetch cell data, cache it, and disconnect.
+     * Used by background worker for periodic widget updates.
+     */
+    suspend fun fetchAndCache(): CellData {
+        val mac = dataStore.getSelectedDeviceMac()
+            ?: throw Exception("No device selected")
+        try {
+            connect(mac)
+            val cellData = getCellData()
+            // Also try device info, but don't fail if it errors
+            try { getDeviceInfo() } catch (_: Exception) {}
+            return cellData
+        } finally {
+            disconnect()
+        }
     }
 
     /**
