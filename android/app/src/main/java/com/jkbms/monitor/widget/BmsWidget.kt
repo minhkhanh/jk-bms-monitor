@@ -144,4 +144,17 @@ class BmsWidgetReceiver : GlanceAppWidgetReceiver() {
             BmsWorkScheduler.schedulePeriodicRefresh(context)
         }
     }
+
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: android.appwidget.AppWidgetManager,
+        appWidgetIds: IntArray
+    ) {
+        super.onUpdate(context, appWidgetManager, appWidgetIds)
+        // Trigger immediate fetch whenever Android updates the widget
+        val dataStore = BmsDataStore(context)
+        if (dataStore.hasSelectedDevice()) {
+            BmsWorkScheduler.triggerImmediateRefresh(context)
+        }
+    }
 }
