@@ -3,13 +3,17 @@ package com.jkbms.monitor.widget
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.*
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.color.ColorProvider
@@ -45,15 +49,16 @@ class BmsWidget : GlanceAppWidget() {
     }
 }
 
+@Preview
 @Composable
 fun BmsWidgetContent(
-    percent: Int,
-    voltage: Float,
-    current: Float,
-    power: Float,
-    temperature: Float,
-    deviceName: String,
-    lastUpdate: String
+    percent: Int = 50,
+    voltage: Float = 72.1f,
+    current: Float = 0.0f,
+    power: Float = 0.0f,
+    temperature: Float = 30.0f,
+    deviceName: String = "JK-BMS",
+    lastUpdate: String = "Last update"
 ) {
     val batteryColor = when {
         percent < 0 -> ColorProvider(Color(0xFF757575), Color(0xFF757575))
@@ -67,7 +72,6 @@ fun BmsWidgetContent(
             .fillMaxSize()
             .background(Color(0xFF1E1E1E))
             .cornerRadius(16.dp)
-            .clickable(actionStartActivity<MainActivity>())
             .padding(12.dp)
     ) {
         Column(modifier = GlanceModifier.fillMaxSize()) {
@@ -80,44 +84,60 @@ fun BmsWidgetContent(
                     "⚡ $deviceName",
                     style = TextStyle(
                         color = ColorProvider(Color(0xFF81C784), Color(0xFF81C784)),
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
-                    )
+                    ),
+                    modifier = GlanceModifier.defaultWeight().clickable(actionStartActivity<MainActivity>())
+                )
+
+                // Refresh Button
+                Text(
+                    "↻",
+                    style = TextStyle(
+                        color = ColorProvider(Color.White, Color.White),
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    modifier = GlanceModifier.clickable(actionRunCallback<RefreshAction>()).padding(8.dp)
                 )
             }
 
-            Spacer(modifier = GlanceModifier.height(8.dp))
+            Spacer(modifier = GlanceModifier.height(10.dp))
 
             // Battery percentage
             if (percent >= 0) {
-                Text(
-                    "${percent}%",
-                    style = TextStyle(
-                        color = batteryColor,
-                        fontSize = 36.sp,
-                        fontWeight = FontWeight.Bold
+                Row(modifier = GlanceModifier.fillMaxWidth().clickable(actionStartActivity<MainActivity>())) {
+                    Text(
+                        "${percent}%",
+                        style = TextStyle(
+                            color = batteryColor,
+                            fontSize = 52.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     )
-                )
+                }
 
-                Spacer(modifier = GlanceModifier.height(4.dp))
+                Spacer(modifier = GlanceModifier.height(8.dp))
 
                 // Stats
                 Text(
                     "%.1fV  %.1fA  %.1fW".format(voltage, current, power),
                     style = TextStyle(
                         color = ColorProvider(Color(0xFFB0B0B0), Color(0xFFB0B0B0)),
-                        fontSize = 11.sp
-                    )
+                        fontSize = 14.sp
+                    ),
+                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
                 )
 
-                Spacer(modifier = GlanceModifier.height(2.dp))
+                Spacer(modifier = GlanceModifier.height(4.dp))
 
                 Text(
                     "🌡️ %.1f°C  •  $lastUpdate".format(temperature),
                     style = TextStyle(
                         color = ColorProvider(Color(0xFF757575), Color(0xFF757575)),
-                        fontSize = 10.sp
-                    )
+                        fontSize = 12.sp
+                    ),
+                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
                 )
             } else {
                 Spacer(modifier = GlanceModifier.height(8.dp))
@@ -126,9 +146,23 @@ fun BmsWidgetContent(
                     style = TextStyle(
                         color = ColorProvider(Color(0xFF757575), Color(0xFF757575)),
                         fontSize = 14.sp
-                    )
+                    ),
+                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
                 )
             }
+        }
+    }
+}
+
+class RefreshAction : ActionCallback {
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters
+    ) {
+        val dataStore = BmsDataStore(context)
+        if (dataStore.hasSelectedDevice()) {
+            BmsWorkScheduler.triggerImmediateRefresh(context)
         }
     }
 }

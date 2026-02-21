@@ -123,20 +123,27 @@ class BmsDataStore(context: Context) {
     fun hasCachedData(): Boolean = getCachedBatteryPercent() >= 0
 
     /**
-     * Returns human-readable relative time, e.g. "2 min ago", "1 hour ago".
+     * Returns human-readable time, e.g. "14:30 (2m ago)".
      */
     fun getLastUpdateFormatted(): String {
         val lastMs = getLastUpdateTimeMs()
         if (lastMs == 0L) return "--"
+        
         val diffMs = System.currentTimeMillis() - lastMs
         val minutes = TimeUnit.MILLISECONDS.toMinutes(diffMs)
         val hours = TimeUnit.MILLISECONDS.toHours(diffMs)
         val days = TimeUnit.MILLISECONDS.toDays(diffMs)
-        return when {
+        
+        val relative = when {
             minutes < 1 -> "just now"
             minutes < 60 -> "${minutes}m ago"
             hours < 24 -> "${hours}h ago"
             else -> "${days}d ago"
         }
+        
+        val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        val absolute = sdf.format(java.util.Date(lastMs))
+        
+        return "$absolute ($relative)"
     }
 }

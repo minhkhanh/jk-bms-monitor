@@ -11,14 +11,12 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /**
  * Manages BLE connection to a JK BMS device.
@@ -31,13 +29,17 @@ class BleConnection(private val context: Context) {
         val JK_BMS_SERVICE_UUID: UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
         val JK_BMS_CHAR_UUID: UUID = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-        private const val CONNECT_TIMEOUT_MS = 10_000L
+        private const val CONNECT_TIMEOUT_MS = 30_000L
     }
 
     private var gatt: BluetoothGatt? = null
-    private val notificationChannel = Channel<ByteArray>(Channel.BUFFERED)
+    private val notificationChannel = Channel<ByteArray>(
+        capacity = 1024,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
     private var connectionDeferred: CompletableDeferred<Unit>? = null
     private var servicesDeferred: CompletableDeferred<Unit>? = null
+    private var mtuDeferred: CompletableDeferred<Unit>? = null
 
     val isConnected: Boolean get() = gatt != null
 
@@ -61,7 +63,15 @@ class BleConnection(private val context: Context) {
                     connectionDeferred?.completeExceptionally(
                         Exception("Disconnected with status $status")
                     )
-                    this@BleConnection.gatt = null
+                    try {
+                        @Suppress("MissingPermission")
+                        gatt.close()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error closing gatt on disconnect", e)
+                    }
+                    if (this@BleConnection.gatt === gatt) {
+                        this@BleConnection.gatt = null
+                    }
                 }
             }
         }
@@ -69,6 +79,7 @@ class BleConnection(private val context: Context) {
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             Log.d(TAG, "Services discovered: status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d(TAG, "Services discovered successfully")
                 connectionDeferred?.complete(Unit)
             } else {
                 connectionDeferred?.completeExceptionally(
@@ -84,6 +95,7 @@ class BleConnection(private val context: Context) {
         ) {
             if (characteristic.uuid == JK_BMS_CHAR_UUID) {
                 characteristic.value?.let { data ->
+                    //Log.d(TAG, "Characteristic changed old: ${data.size} bytes")
                     notificationChannel.trySend(data)
                 }
             }
@@ -94,6 +106,7 @@ class BleConnection(private val context: Context) {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
+            //Log.d(TAG, "Characteristic changed: ${value.size} bytes")
             if (characteristic.uuid == JK_BMS_CHAR_UUID) {
                 notificationChannel.trySend(value)
             }
@@ -106,6 +119,8 @@ class BleConnection(private val context: Context) {
     @Suppress("MissingPermission")
     suspend fun connect(address: String) {
         disconnect()
+
+        Log.d(TAG, "Connecting to $address...")
 
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = bluetoothManager.adapter ?: throw Exception("Bluetooth not available")
@@ -136,7 +151,7 @@ class BleConnection(private val context: Context) {
         // Write to CCCD to enable notifications
         val descriptor = characteristic.getDescriptor(CCCD_UUID)
         if (descriptor != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val descResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             } else {
                 @Suppress("DEPRECATION")
@@ -144,8 +159,9 @@ class BleConnection(private val context: Context) {
                 @Suppress("DEPRECATION")
                 gatt.writeDescriptor(descriptor)
             }
-            // Small delay to allow descriptor write to complete
-            kotlinx.coroutines.delay(200)
+            Log.d(TAG, "enableNotifications writeDescriptor initiated: $descResult")
+            // Delay to allow descriptor write to complete (Android drops overlapping writes)
+            kotlinx.coroutines.delay(600)
         }
 
         Log.d(TAG, "Notifications enabled")
@@ -162,19 +178,20 @@ class BleConnection(private val context: Context) {
         val characteristic = service.getCharacteristic(JK_BMS_CHAR_UUID)
             ?: throw Exception("JK BMS characteristic not found")
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val writeResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt.writeCharacteristic(
                 characteristic,
                 data,
-                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
             )
         } else {
             @Suppress("DEPRECATION")
             characteristic.value = data
-            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
             @Suppress("DEPRECATION")
             gatt.writeCharacteristic(characteristic)
         }
+        Log.d(TAG, "writeCharacteristic (size=${data.size}) result: $writeResult")
     }
 
     /**
@@ -183,6 +200,7 @@ class BleConnection(private val context: Context) {
     @Suppress("MissingPermission")
     fun disconnect() {
         gatt?.let {
+            Log.d(TAG, "Disconnecting...",  Exception())
             it.disconnect()
             it.close()
         }

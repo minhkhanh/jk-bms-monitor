@@ -1,16 +1,58 @@
 package com.jkbms.monitor.worker
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.work.Constraints
+import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.jkbms.monitor.service.BmsForegroundService
 import java.util.concurrent.TimeUnit
 
+import com.jkbms.monitor.service.BmsUpdater
+
 /**
- * Utility for scheduling/cancelling the periodic BMS refresh worker.
+ * Worker that simply wakes up every 15 minutes to start the foreground service.
+ * We use this because WorkManager handles the 15-minute reliable scheduling,
+ * but Foreground Service handles keeping the app alive during BLE connect/fetch.
+ */
+class BmsTriggerWorker(
+    appContext: Context,
+    params: WorkerParameters
+) : CoroutineWorker(appContext, params) {
+    override suspend fun doWork(): Result {
+        Log.d("BmsTriggerWorker", "WorkManager woke up, triggering Foreground Service")
+        
+        return try {
+            try {
+                BmsWorkScheduler.triggerImmediateRefresh(applicationContext)
+            } catch (e: Exception) {
+                // Catch ForegroundServiceStartNotAllowedException (Android 12+) or IllegalStateException
+                val isBgRestriction = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && 
+                    e is android.app.ForegroundServiceStartNotAllowedException
+                
+                if (isBgRestriction || e is IllegalStateException) {
+                    Log.d("BmsTriggerWorker", "Foreground service start not allowed in background. Running fetch directly in worker.")
+                    BmsUpdater.performFetch(applicationContext)
+                } else {
+                    throw e
+                }
+            }
+            Result.success()
+        } catch (e: Exception) {
+            Log.e("BmsTriggerWorker", "Worker failed", e)
+            Result.failure()
+        }
+    }
+}
+
+/**
+ * Utility for scheduling the periodic BMS refresh worker or triggering immediate refresh.
  */
 object BmsWorkScheduler {
 
@@ -19,7 +61,6 @@ object BmsWorkScheduler {
 
     /**
      * Schedule periodic refresh every 15 minutes.
-     * Uses KEEP policy — if already scheduled, does nothing.
      */
     fun schedulePeriodicRefresh(context: Context) {
         Log.d(TAG, "Scheduling periodic BMS refresh")
@@ -27,7 +68,7 @@ object BmsWorkScheduler {
             .setRequiresBatteryNotLow(true)
             .build()
 
-        val request = PeriodicWorkRequestBuilder<BmsRefreshWorker>(
+        val request = PeriodicWorkRequestBuilder<BmsTriggerWorker>(
             15, TimeUnit.MINUTES
         ).setConstraints(constraints)
             .build()
@@ -41,12 +82,12 @@ object BmsWorkScheduler {
     }
 
     /**
-     * Trigger a one-time immediate refresh (e.g. from widget tap or manual action).
+     * Trigger a one-time immediate refresh via Foreground Service.
      */
     fun triggerImmediateRefresh(context: Context) {
-        Log.d(TAG, "Triggering immediate BMS refresh")
-        val request = OneTimeWorkRequestBuilder<BmsRefreshWorker>().build()
-        WorkManager.getInstance(context).enqueue(request)
+        Log.d(TAG, "Triggering immediate BMS refresh via Foreground Service")
+        val intent = Intent(context, BmsForegroundService::class.java)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     /**

@@ -12,6 +12,11 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
+    <!-- Foreground Service & Notification Permissions -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".BmsApplication"
         android:allowBackup="true"
@@ -42,6 +47,12 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/bms_widget_info" />
         </receiver>
+
+        <!-- Foreground Service -->
+        <service
+            android:name=".service.BmsForegroundService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
 
     </application>
 </manifest>
